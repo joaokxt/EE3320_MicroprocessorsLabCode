@@ -84,7 +84,7 @@ float read_potentiometer(){
     uint16_t potentiometer_data;
     float voltage_data;
 
-    Xadc_Cfg = 0x0803;                                           // Point to read the potentiometer 256 samples. with settlein.
+    Xadc_Cfg = 0x0803;                                           // Point to read the potentiometer (VO: 0011) 256 samples. with settlein.
 
     potentiometer_data = Xadc_Data;                              // Get current data on ADC
 

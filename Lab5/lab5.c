@@ -162,9 +162,10 @@ void reset_iic(void){
     SLCR_LOCK = LOCK_KEY;           // Relock SLCRs
 }
 
-void config_iic(){
-
-    IIC_CFG = IIC_Config;
+void config_iic(){                  
+                                    // 0b110000001111, D=1, M=1, AM=1(7-bit), ACK=1  
+    IIC_CFG = IIC_Config;           // SCL = 111MHz/[(DIVA+1)(DIVB+1)(22)]
+                                    // DIVA = 0, DIVB = 2 for 400kHz (fast mode)
 }
 
 void init_iic(){
@@ -226,8 +227,8 @@ void write_spi(uint8_t adr, uint8_t byteToWrite){
     while((SPI0_SR & 0x10)) {  // Wait RX FIFO to empty
         dummyRead = SPI0_RXD;
     }
-   
-    SPI0_CFG = CFG_SS0;             // Slave select 0. Put SPI in manual mode.
+                                    // CPOL = 1, CPHA = 1, M_EN = M_CS = 1, BAUDDIV = 4. CLK = 166MHz/2^(4+1) = 5.2MHz. Below 10MHz rqmnt.
+    SPI0_CFG = CFG_SS0;             // Slave select 0. Put SPI in manual mode. 
     SPI0_TXD = adr;                 // Send address. Write bit is MSB (0)
     SPI0_TXD = byteToWrite;         // Send message to be transmitted
     SPI0_CFG = CFG_SS0_Start;       // Initiate transmission.
