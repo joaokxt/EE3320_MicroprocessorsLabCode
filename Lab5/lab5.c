@@ -4,9 +4,9 @@
 
 // Useful defines
 #define timedelay 200000
-#define CFG_NoSS 0x0BC27
-#define CFG_SS0 0x08C27
-#define CFG_SS0_Start 0x18C27
+#define CFG_NoSS 0x0FC27
+#define CFG_SS0 0x0C027
+#define CFG_SS0_Start 0x1C027
 
 ////////////
 // IIC defines
@@ -41,6 +41,7 @@
 /////////////////////////////////////
 #define LSM9DS1_Who 0x0f
 #define LSM9DS1_CTRL_Reg1 0x10
+#define LSM9DS1_CTRL_Reg2 0x20
 #define LSM9DS1_Temp_G_low 0x15
 #define LSM9DS1_Temp_G_high 0x16
 #define JUNK 0
@@ -151,30 +152,19 @@ char UARTGetChar(){
     IIC Setup
 */
 
+/*
+    Reset I2C. Credit to M. Welker
+*/
 void reset_iic(void){
-    SLCR_UNLOCK = UNLOCK_KEY;   //unlock SLCRs
-    SLCR_IIC_RST = 0x3;         //assert I2C reset
-    SLCR_IIC_RST = 0;           //deassert I2C reset
-    SLCR_LOCK = LOCK_KEY;       //relock SLCRs
+    SLCR_UNLOCK = UNLOCK_KEY;       // Unlock SLCRs
+    SLCR_IIC_RST = 0x3;             // Assert I2C reset
+    SLCR_IIC_RST = 0;               // Deassert I2C reset
+    SLCR_LOCK = LOCK_KEY;           // Relock SLCRs
 }
 
 void config_iic(){
 
-    // Set clock to 400kHz (400kbits/s --> Fast mode). 111MHz/((DIVA+1)*(DIVB+1)*22)
-    // Bits 14 & 15 for DIVA. We want DIVA = 0.
-    // Bits 8 - 13 for DIVB. We want DIVB = 12.
-    // Bit 7 is reserved. Leave low.
-    // Bit 6 clears FIFO and then goes back to 0.
-    // Bits 5 & 4 are not relevant because ZYNQ is the only master here.
-    // Bit 3 allows master to generate as ACK when receiving. Not necessary, but it is good practice.
-    // Bit 2 defines addressing mode. '1' for 7-bit (only format supported by ZYNQ).
-    // Bit 1 defines master.
-    // Bit 0 determines direction of data. We will only read, so we raise it to 1.
-
-    // This is 0000110001001111 = 0xC4F
-
     IIC_CFG = IIC_Config;
-
 }
 
 void init_iic(){
@@ -230,108 +220,70 @@ void reset_spi(void)
 	SLCR_LOCK = LOCK_KEY;		// Relock SLCRs
 }
 
-void config_spi(){
-    SPI0_CFG = 0x8027;          // Slave pre-selected to 0
-}
+void write_spi(uint8_t adr, uint8_t byteToWrite){
+    uint32_t dummyRead = 0;
 
-void init_spi(){
-    reset_spi();
-    config_spi();
-}
-
-void WRITE_SPI(uint8_t adr,uint8_t WRITE_BYTE){
-    uint32_t dummy_read;
-    while((SPI0_SR & 0x10) != 0) {
-        dummy_read = SPI0_RXD;
+    while((SPI0_SR & 0x10)) {  // Wait RX FIFO to empty
+        dummyRead = SPI0_RXD;
     }
    
-    SPI0_CFG = 0x0C027;
-    SPI0_TXD = adr;
-    SPI0_TXD = WRITE_BYTE;
-    SPI0_CFG = 0x1C027;
+    SPI0_CFG = CFG_SS0;             // Slave select 0. Put SPI in manual mode.
+    SPI0_TXD = adr;                 // Send address. Write bit is MSB (0)
+    SPI0_TXD = byteToWrite;         // Send message to be transmitted
+    SPI0_CFG = CFG_SS0_Start;       // Initiate transmission.
    
-    while((SPI0_SR & 0x04) == 0);
+    usleep(timedelay);
    
-    dummy_read = SPI0_RXD;
-   
-    SPI0_CFG = 0x0FC27;
+    dummyRead = SPI0_RXD;           // One dummy read to push data into peripheral       
+
+    SPI0_CFG = CFG_NoSS;            // Stop transmission and deselect slave
 }
 
-uint8_t READ_SPI(uint8_t adr){
-    uint32_t dummy_read;
-    uint32_t return_read;
+uint8_t read_spi(uint8_t adr){
+    uint8_t dummyRead;
+    uint8_t returnRead;
 
-    while((SPI0_SR & 0x10) != 0) {
-        dummy_read = SPI0_RXD;
+    while(SPI0_SR & 0x10) {  // Wait RX FIFO to empty
+        dummyRead = SPI0_RXD;
     }
    
-    SPI0_CFG = 0x0C027;
-    SPI0_TXD = (adr | 0x80);
-    SPI0_TXD = 0x00;
-    SPI0_CFG = 0x1C027;
+    SPI0_CFG = CFG_SS0;             // Enable manual mode & select SS0
+    SPI0_TXD = (adr | 0x80);        // Pass address and read bit to TX register
+    SPI0_TXD = 0x00;                // Add dummy byte for reading
+    SPI0_CFG = CFG_SS0_Start;       // Start transmisstion
    
-    while((SPI0_SR & 0x04) == 0);
+    usleep(timedelay);
    
-    dummy_read = SPI0_RXD;
-    return_read = SPI0_RXD;
+    dummyRead = SPI0_RXD;           // 1st read byte is a dummy (1st write was address only)
+    returnRead = SPI0_RXD;          // 2nd read to retrieve actual data (2nd write was a dummy)
    
-    SPI0_CFG = 0x0FC27;
+    SPI0_CFG = CFG_NoSS;            // Stop transmision and deselect slave
    
-    return (uint8_t)return_read;
+    return returnRead;
 }
+
 
 uint16_t read_temp_spi(){
-    uint8_t transmitByte = 0, dummyByte = 0;
-    uint8_t lowByte, highByte;
-    uint16_t temperature = 0;
-
-    transmitByte |= 0x15;        // Shift 7-bit address
-    transmitByte |= 0x80;       // Read bit
-
-    SPI0_TXD = transmitByte;
-
-    SPI0_TXD = dummyByte;
-    highByte = SPI0_RXD;
-    SPI0_TXD = dummyByte;
-    lowByte = SPI0_RXD;
-
-    temperature |= (highByte<<8);
-    temperature |= lowByte;
-    temperature &= 0xFFF;
-
-    if(highByte & 0x8){
-        temperature --;
-        temperature = ~temperature;
+    int8_t spiLow = 0, spiHigh = 0;
+    int16_t spiReading, spiCelsius;
+    spiLow = read_spi(LSM9DS1_Temp_G_low);      // Read low byte for temperature
+    spiHigh = read_spi(LSM9DS1_Temp_G_high);    // Read high byte
+    spiReading = (spiHigh << 8) | spiLow;       // Shift bytes into correct bitfield in 16-bit format
+    if(spiHigh & 0x80){                         // If MSB of High byte is 1, number is negative. Convert.
+        spiReading--;                           
+        spiReading = ~spiReading;
     }
-
-    return temperature;
+    spiCelsius = (spiReading / 16) + 25;        // Resolution of (1/16)C*/bit and offset of 25C.
+    return spiCelsius;
 }
 
 uint16_t read_z_gyro_spi(){
-    uint8_t transmitByte = 0, dummyByte = 0;
-    uint8_t lowByte, highByte;
-    uint16_t zAngular = 0;
-
-    transmitByte |= 0x1C;        // Shift 7-bit address
-    transmitByte |= 0x80;        // Read bit
-
-    SPI0_TXD = transmitByte;
-
-    SPI0_TXD = dummyByte;
-    highByte = SPI0_RXD;
-    SPI0_TXD = dummyByte;
-    lowByte = SPI0_RXD;
-
-    zAngular |= (highByte<<8);
-    zAngular |= lowByte;
-    zAngular &= 0xFFF;
-
-    if(highByte & 0x8){
-        zAngular --;
-        zAngular = ~zAngular;
-    }
-
-    return zAngular;
+    int8_t zAxisL, zAxisH;
+    int16_t zAxis;
+    zAxisL = read_spi(0x1C);                // Read LSByte
+    zAxisH = read_spi(0x1D);                // Read MSByte
+    zAxis = (zAxisH << 8) | zAxisL;         // Shift into correct bitfields
+    return zAxis;
 }   
 
 
@@ -369,24 +321,18 @@ void display_num(uint16_t n) {
 */
 
 int main(void){
-    int currentTemp;
     char buffer [64]; 
-    uint16_t currentZAngular;
-
-    int8_t SPI_LO = 0, SPI_HI = 0;
-    int16_t SPI_Temp, SPI_TempC;
-
-    int8_t zAxisL, zAxisH;
-    int16_t zAxis;
+    uint16_t tempIIC, tempSPI, zAxisReading;
 
     init_uart();
     init_iic();
     
     reset_spi();
-    SPI0_CFG = 0x0FC27;
+    SPI0_CFG = CFG_NoSS;
     SPI0_EN = 1;
-    WRITE_SPI(0x10,0xC0);
-    WRITE_SPI(0x13,0x38);
+
+    write_spi(LSM9DS1_CTRL_Reg1, 0xA0);         // Configure LSM9DS1 sensor's baudrate
+    write_spi(LSM9DS1_CTRL_Reg2, 0xA0);
 
     for(;;){
         UARTSendString("\r\n");
@@ -394,31 +340,26 @@ int main(void){
             //////////////////////////////////////
             // Read temperature through SPI
             //////////////////////////////////////
-            SPI_LO = (int8_t)READ_SPI(LSM9DS1_Temp_G_low);
-            SPI_HI = (int8_t)READ_SPI(LSM9DS1_Temp_G_high);
-            SPI_Temp = (SPI_HI << 8) | SPI_LO;
-            SPI_TempC = 25 + (SPI_Temp / 16);
-            // currentTemp = read_temp_spi();
-            display_num(SPI_TempC);
-            sprintf(buffer, "Current temperature is %d C°, according to LSM9DS1 sensor. ", SPI_TempC);
+            tempSPI = read_temp_spi();
+            display_num(tempSPI);
+            sprintf(buffer, "Current temperature is %d C°, according to LSM9DS1 sensor.\r\n", tempSPI);
             //////////////////////////////////////
         } else {
             //////////////////////////////////////
             // Read temperature through I2C
             //////////////////////////////////////
-            currentTemp = read_temp_iic();
-            display_num(currentTemp);
-            sprintf(buffer, "Current temperature is %d C°, according to LM75B sensor. ", currentTemp);
+            tempIIC = read_temp_iic();
+            display_num(tempIIC);
+            sprintf(buffer, "Current temperature is %d C°, according to LM75B sensor.\r\n", tempIIC);
             //////////////////////////////////////
         }
+
         UARTSendString(buffer);
-        UARTSendString("\r\n");
-        zAxisL = READ_SPI(0x1C); 
-        zAxisH = READ_SPI(0x1D); 
-        zAxis = (zAxisH << 8) | zAxisL;
-        sprintf(buffer, "Z-Axis angular rate: %d ", zAxis);
+        zAxisReading = read_z_gyro_spi();
+        sprintf(buffer, "Z-Axis angular rate: %d ", zAxisReading);
         UARTSendString(buffer);
         UARTSendString("\r\n----------------------------------------");
+
         sleep(1);
     }
 }
