@@ -152,15 +152,15 @@ char UARTGetChar(){
 */
 
 void reset_iic(void){
-    SLCR_UNLOCK = UNLOCK_KEY; //unlock SLCRs
-    SLCR_IIC_RST = 0x3; //assert I2C reset
-    SLCR_IIC_RST = 0; //deassert I2C reset
-    SLCR_LOCK = LOCK_KEY; //relock SLCRs
+    SLCR_UNLOCK = UNLOCK_KEY;   //unlock SLCRs
+    SLCR_IIC_RST = 0x3;         //assert I2C reset
+    SLCR_IIC_RST = 0;           //deassert I2C reset
+    SLCR_LOCK = LOCK_KEY;       //relock SLCRs
 }
 
 void config_iic(){
 
-    // Set clock to 400kHz. 111MHz/((DIVA+1)*(DIVB+1))/22
+    // Set clock to 400kHz (400kbits/s --> Fast mode). 111MHz/((DIVA+1)*(DIVB+1)*22)
     // Bits 14 & 15 for DIVA. We want DIVA = 0.
     // Bits 8 - 13 for DIVB. We want DIVB = 12.
     // Bit 7 is reserved. Leave low.
@@ -171,7 +171,7 @@ void config_iic(){
     // Bit 1 defines master.
     // Bit 0 determines direction of data. We will only read, so we raise it to 1.
 
-    // This is 0000110001001111= 0xC4F
+    // This is 0000110001001111 = 0xC4F
 
     IIC_CFG = IIC_Config;
 

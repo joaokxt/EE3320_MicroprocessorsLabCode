@@ -37,8 +37,8 @@ void ResetUart(){
 }
 
 void SetBaud(){                      // Set Baudrate to 115200
-    UART1_BAUDGEN = BaudGen115200;   // Set BAUDGEN to define RX sampling clock 
-    UART1_BAUDDIV = BaudDiv115200;   // Set BAUDDIV to define TX clock. This clock will be the communication pacesetter
+    UART1_BAUDGEN = BaudGen115200;   // Set BAUDGEN to define RX sampling clock. RXD_C = 100MHz / BAUDGEN
+    UART1_BAUDDIV = BaudDiv115200;   // Set BAUDDIV to define TX clock. TXD_C = RXD_C / (BAUDDIV + 1)
 }
 
 void ConfigureUart(){
@@ -53,7 +53,7 @@ void ConfigureUart(){
         0 --> Channel mode normal (no echo)
         Other bits --> UNUSED
 
-    Pack this together and we need to pass the following to the register
+    Pack this together and we need to pass the following to the mode register
     00100000 = 0x20
   */
 
@@ -89,7 +89,7 @@ void UARTSendString(char *str){
 }
 
 char UARTGetChar(){
-    while(UARTEmptyRx()){sleep(3);} // Wait for FIFO to fill up;
+    while(UARTEmptyRx()){sleep(2);} // Wait for FIFO to fill up;
     return (char) UART1_DATA;       // Retrieve data and cast to char
 }
 
@@ -106,7 +106,7 @@ int GetInt(){
     char c = 'a';
 
     while(c != 0x0d){
-        c = UARTGetChar();          // Get next character in FIFO
+        c = UARTGetChar();          // Get next character in FIFO. UART sends LSB first.
     
         if((c < 0x30 || c > 0x39) && !(c == 0x0d || c == 0x00)){
             return -1;              // Check if character is valid, otherwise return -1
@@ -117,10 +117,10 @@ int GetInt(){
         i++;                      
     }
 
-    while(j < i){                   // Stop when j = i, otherwise NULL will be read
-        c = numString[j];           // Retrieve first character of string
-        temp = c - 0x30;            // Convert it to number
-        target = 10*target + temp;  // Shift it into its right position
+    while(j < i){                     // Stop when j = i, otherwise NULL will be read
+        c = numString[j];             // Retrieve first character of string
+        temp = c - 0x30;              // Convert it to number
+        target = 10 * target + temp;  // Shift it into its right position
         j++;                        
     }
 
